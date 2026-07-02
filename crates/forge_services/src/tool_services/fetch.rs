@@ -40,22 +40,31 @@ impl ForgeFetch {
         // these, rustls only trusts the webpki-roots bundle and rejects the
         // proxy's re-signed certificates.
         //
-        // Certificates are loaded from, in order:
-        //   1. FORGE_ROOT_CERT_PATHS  — comma-separated list of PEM/DER paths
-        //   2. SSL_CERT_FILE          — single PEM bundle (common convention)
-        //   3. NODE_EXTRA_CA_CERTS    — single PEM file (Node.js convention)
-        //   4. REQUESTS_CA_BUNDLE     — single PEM bundle (Python convention)
-        let cert_paths: Vec<String> = if let Ok(val) = env::var("FORGE_ROOT_CERT_PATHS") {
-            val.split(',').map(|s| s.trim().to_string()).collect()
-        } else if let Ok(val) = env::var("SSL_CERT_FILE") {
-            vec![val]
-        } else if let Ok(val) = env::var("NODE_EXTRA_CA_CERTS") {
-            vec![val]
-        } else if let Ok(val) = env::var("REQUESTS_CA_BUNDLE") {
-            vec![val]
-        } else {
-            vec![]
-        };
+        // Certificates are loaded from all supported sources, in order:
+        //   1. FORGE_HTTP_ROOT_CERT_PATHS — comma-separated list used by HTTP config
+        //   2. FORGE_ROOT_CERT_PATHS      — comma-separated list of PEM/DER paths
+        //   3. SSL_CERT_FILE              — single PEM bundle (common convention)
+        //   4. NODE_EXTRA_CA_CERTS        — single PEM file (Node.js convention)
+        //   5. REQUESTS_CA_BUNDLE         — single PEM bundle (Python convention)
+        let mut cert_paths: Vec<String> = Vec::new();
+        for key in ["FORGE_HTTP_ROOT_CERT_PATHS", "FORGE_ROOT_CERT_PATHS"] {
+            if let Ok(val) = env::var(key) {
+                cert_paths.extend(
+                    val.split(',')
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(ToOwned::to_owned),
+                );
+            }
+        }
+        for key in ["SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS", "REQUESTS_CA_BUNDLE"] {
+            if let Ok(val) = env::var(key) {
+                let val = val.trim();
+                if !val.is_empty() {
+                    cert_paths.push(val.to_string());
+                }
+            }
+        }
 
         for cert_path in &cert_paths {
             match fs::read(cert_path) {
